@@ -1,0 +1,506 @@
+<?php
+require_once './libs/abraham/twitteroauth/autoload.php';
+use Abraham\TwitterOAuth\TwitterOAuth;
+
+
+
+class Controllers_Sosial_Twitter_Twitter extends Modules_Plugin_Base {
+	
+	private $CONSUMER_KEY = 'QBBxvfld6enpaAj8SW56XfTgz';
+	private $CONSUMER_SECRET = 'wcMiDzZApUCazggGG4DUc5vq0OcmmLumo104RbI2MlMbJX45MY';
+	private $OAUTH_CALLBACK ='https://theteamtheteam.com/sosialapi/sosial/twitter/twitter/GetOauthToken';
+
+	public function __construct() {
+		parent::__construct();
+		$this->logger->write('debug', 'HTTP REQUEST: '.print_r($_REQUEST,1));
+	}
+
+	
+
+	public function GetOauthToken(){
+
+		$request_token = [];
+		$request_token['oauth_token'] = $_SESSION['oauth_token'];
+		$request_token['oauth_token_secret'] = $_SESSION['oauth_token_secret'];
+
+		if (isset($_REQUEST['oauth_token'])) {
+			
+			$connection = new TwitterOAuth($this->CONSUMER_KEY, $this->CONSUMER_SECRET, $request_token['oauth_token'], $request_token['oauth_token_secret']);
+			$access_token = $connection->oauth("oauth/access_token", ["oauth_verifier" => $_REQUEST['oauth_verifier']]);
+			$this->_success($access_token);die;
+		}
+
+		$connection = new TwitterOAuth($this->CONSUMER_KEY, $this->CONSUMER_SECRET);
+		$request_token = $connection->oauth('oauth/request_token', array('oauth_callback' => $this->OAUTH_CALLBACK));
+
+		$_SESSION['oauth_token'] = $request_token['oauth_token'];
+		$_SESSION['oauth_token_secret'] = $request_token['oauth_token_secret'];
+
+		$url = $connection->url('oauth/authorize', array('oauth_token' => $request_token['oauth_token']));
+		header("Location: $url");
+		exit();
+	
+	}
+
+	public function show(){
+		$this->_mandatory( array('oauth_token','oauth_token_secret','mention_id'));
+		$oauth_token = $this->input->post('oauth_token');
+		$oauth_token_secret = $this->input->post('oauth_token_secret');
+		$mention_id = $this->input->post('mention_id');
+		$connection = new TwitterOAuth($this->CONSUMER_KEY, $this->CONSUMER_SECRET, $oauth_token, $oauth_token_secret);
+
+		$params = array(
+			'id'  => $mention_id,
+			'include_entities' => FALSE,
+			'trim_user'=> false,
+		  );
+
+		$statues = $connection->get("statuses/show",$params);
+		if(isset($statues->errors)){
+			$this->_error($statues->errors['0']->code.' - '.$statues->errors['0']->message);
+		}else{
+			$this->_success($statues);
+		}
+	}
+
+	public function posttweet(){
+		
+		$this->_mandatory( array('oauth_token','oauth_token_secret','message'));
+		$oauth_token = $this->input->post('oauth_token');
+		$oauth_token_secret = $this->input->post('oauth_token_secret');
+		$message = $this->input->post('message');
+		$connection = new TwitterOAuth($this->CONSUMER_KEY, $this->CONSUMER_SECRET, $oauth_token, $oauth_token_secret);
+
+		$params = array(
+			'status'  => $message,
+			'trim_user' => TRUE,
+			'include_entities'=> FALSE,
+		  );
+
+		$statues = $connection->post("statuses/update",$params);
+		if(isset($statues->errors)){
+			$this->_error($statues->errors['0']->code.' - '.$statues->errors['0']->message);
+		}else{
+			$response = array();
+			$response['mention_id'] 					=  $statues->id;
+			$response['mention'] 						=  $statues->text;
+			$response['source'] 						=  $statues->source;
+			$response['in_reply_to_status_id'] 			=  $statues->in_reply_to_status_id;
+			$response['in_replay_from_tweet'] 			=  $this->showstatus($statues->in_reply_to_status_id,$oauth_token,$oauth_token_secret);       
+			$response['created_at'] 					=  date('Y-m-d h:i:s',strtotime($statues->created_at));
+					
+		
+			
+			$this->_success($response);
+		}	
+				 
+	}
+
+	public function getmention(){
+		$this->_mandatory( array('oauth_token','oauth_token_secret','limit'));
+		$oauth_token = $this->input->post('oauth_token');
+		$oauth_token_secret = $this->input->post('oauth_token_secret');
+		$limit = $this->input->post('limit');
+		$connection = new TwitterOAuth($this->CONSUMER_KEY, $this->CONSUMER_SECRET, $oauth_token, $oauth_token_secret);
+
+		$params = array(
+			'count'  => $limit,
+			'include_entities' => FALSE,
+			'trim_user'=> false,
+		  );
+
+		$statues = $connection->get("statuses/mentions_timeline",$params);
+		if(isset($statues->errors)){
+			$this->_error($statues->errors['0']->code.' - '.$statues->errors['0']->message);
+		}else{
+			$i = 0;
+			$response = array();
+			foreach($statues as $data){
+				//$data->created_at->setTimezone( new \DateTimeZone( 'Asia/Jakarta' ) );
+				$response[$i]['mention_id'] 					=  $data->id;
+				$response[$i]['mention'] 						=  $data->text;
+				$response[$i]['source'] 							=  $data->source;
+				$response[$i]['in_reply_to_status_id'] 			=  $data->in_reply_to_status_id;
+				$response[$i]['in_replay_from_tweet'] 			=  $this->showstatus($data->in_reply_to_status_id,$oauth_token,$oauth_token_secret);
+				$response[$i]['from_user'] 						=  $data->user;        
+				$response[$i]['created_at'] 					=  date('Y-m-d h:i:s',strtotime($data->created_at));
+					
+				$i++;
+			}
+			
+			$this->_success($response);
+		}
+
+				 
+	}
+
+	private function showstatus($id_replay,$oauth_token,$oauth_token_secret){	
+		$connection = new TwitterOAuth($this->CONSUMER_KEY, $this->CONSUMER_SECRET, $oauth_token, $oauth_token_secret);
+		$params = array(
+			'id'  => $id_replay,
+			'include_entities' => FALSE,
+			'trim_user'=> false,
+		  );
+
+		$statues = $connection->get("statuses/show",$params);
+		
+		return $statues->text;
+	}
+
+	public function replaytweet(){
+		$this->_mandatory( array('oauth_token','oauth_token_secret','mention_id','message'));
+		$oauth_token = $this->input->post('oauth_token');
+		$oauth_token_secret = $this->input->post('oauth_token_secret');
+		$mention_id = $this->input->post('mention_id');
+		$message = $this->input->post('message');
+
+		$connection = new TwitterOAuth($this->CONSUMER_KEY, $this->CONSUMER_SECRET, $oauth_token, $oauth_token_secret);
+
+		$params = array(
+			'status'  => $message,
+			'in_reply_to_status_id' => $mention_id,
+			'auto_populate_reply_metadata' => TRUE
+		  );
+
+		$statues = $connection->post("statuses/update",$params);
+		if(isset($statues->errors)){
+			$this->_error($statues->errors['0']->code.' - '.$statues->errors['0']->message);
+		}else{
+				$response = array();
+				$response['mention_id'] 					=  $statues->id;
+				$response['mention'] 						=  $statues->text;
+				$response['source'] 						=  $statues->source;
+				$response['in_reply_to_status_id'] 			=  $statues->in_reply_to_status_id;
+				$response['in_replay_from_tweet'] 			=  $this->showstatus($statues->in_reply_to_status_id,$oauth_token,$oauth_token_secret);       
+				$response['created_at'] 					=  date('Y-m-d h:i:s',strtotime($statues->created_at));
+					
+		
+			
+			$this->_success($response);
+		}
+				 
+	}
+
+	private function getuser($id,$oauth_token,$oauth_token_secret){
+		
+		$connection = new TwitterOAuth($this->CONSUMER_KEY, $this->CONSUMER_SECRET, $oauth_token, $oauth_token_secret);
+		$params = array(
+			'user_id'  => $id,
+		  );
+
+		$statues = $connection->get("users/show",$params);
+		if(isset($statues->errors)){
+			return '-';
+		}else{
+			$response = array();
+			$response['id'] 					=  $statues->id;
+			$response['name'] 					=  $statues->name;
+			$response['screen_name'] 			=  $statues->screen_name;
+			$response['poto_profile'] 			=  $statues->profile_image_url_https;
+			
+			return $response;	
+		}
+				 
+	}
+
+	private function checkme($oauth_token,$oauth_token_secret){
+		$connection = new TwitterOAuth($this->CONSUMER_KEY, $this->CONSUMER_SECRET, $oauth_token, $oauth_token_secret);
+		$response = $connection->get("account/verify_credentials");
+
+		return $response->id;
+	}
+
+	public function getdirectmessage(){
+		
+		$this->_mandatory( array('oauth_token','oauth_token_secret'));
+		$oauth_token = $this->input->post('oauth_token');
+		$oauth_token_secret = $this->input->post('oauth_token_secret');
+
+		$connection = new TwitterOAuth($this->CONSUMER_KEY, $this->CONSUMER_SECRET, $oauth_token, $oauth_token_secret);
+
+		$params = array(
+			'count' => 50,
+		  );
+
+		$statues = $connection->get("direct_messages/events/list",$params);
+		if(isset($statues->errors)){
+			$this->_error($statues->errors['0']->code.' - '.$statues->errors['0']->message);
+		}else{  
+			$i = 0;
+			$response = array();
+			foreach($statues->events as $data){
+
+				// if($data->message_create->sender_id == $this->checkme($oauth_token,$oauth_token_secret)){
+				// 	continue;
+				// }
+				
+				$response[$i]['type'] 						=  $data->type;
+				$response[$i]['id'] 						=  $data->id;
+				$response[$i]['message_data'] 				=  $data->message_create->message_data;
+				$response[$i]['from_id'] 					=  $data->message_create->sender_id;
+				$response[$i]['from_detail'] 				=  $this->getuser($data->message_create->sender_id,$oauth_token,$oauth_token_secret);    
+				$response[$i]['created_timestamp'] 			=  $data->created_timestamp;
+					
+				$i++;
+			}
+
+			$this->_success($response);
+		}
+
+				 
+	}
+
+
+	public function getdirectmessageshow(){
+		
+		$this->_mandatory( array('oauth_token','oauth_token_secret','id'));
+		$oauth_token = $this->input->post('oauth_token');
+		$oauth_token_secret = $this->input->post('oauth_token_secret');
+		$id = $this->input->post('id');
+
+		$connection = new TwitterOAuth($this->CONSUMER_KEY, $this->CONSUMER_SECRET, $oauth_token, $oauth_token_secret);
+
+		$params = array(
+			'id' => $id,
+		  );
+
+		$statues = $connection->get("direct_messages/events/show",$params);
+		if(isset($statues->errors)){
+			$this->_error($statues->errors['0']->code.' - '.$statues->errors['0']->message);
+		}else{  
+			$response = array();
+			$response['type'] 						=  $statues->event->type;
+			$response['id'] 						=  $statues->event->id;
+			$response['message_data'] 				=  $statues->event->message_create->message_data;
+			$response['from_id'] 					=  $statues->event->message_create->sender_id;
+			$response['from_detail'] 				=  $this->getuser($statues->event->message_create->sender_id,$oauth_token,$oauth_token_secret);    
+			$response['created_timestamp'] 			=  $statues->event->created_timestamp;
+
+			$this->_success($response);
+		}
+		
+				 
+	}
+
+
+	public function postdirectmessage(){
+		
+		$this->_mandatory( array('oauth_token','oauth_token_secret','from_id','message'));
+		$oauth_token = $this->input->post('oauth_token');
+		$oauth_token_secret = $this->input->post('oauth_token_secret');
+		$from_id = $this->input->post('from_id');
+		$message = $this->input->post('message');
+
+		$connection = new TwitterOAuth($this->CONSUMER_KEY, $this->CONSUMER_SECRET, $oauth_token, $oauth_token_secret);
+
+		$params = [
+			'event' => [
+				'type' => 'message_create',
+				'message_create' => [
+					'target' => [
+						'recipient_id' => $from_id
+					],
+					'message_data' => [
+						'text' => $message
+					]
+				]
+			]
+		];
+
+		$statues = $connection->post("direct_messages/events/new",$params,true);
+		if(isset($statues->errors)){
+			$this->_error($statues->errors['0']->code.' - '.$statues->errors['0']->message);
+		}else{  
+			$response = array();
+			$response['type'] 						=  $statues->event->type;
+			$response['id'] 						=  $statues->event->id;
+			$response['message_data'] 				=  $statues->event->message_create->message_data;
+			$response['from_id'] 					=  $statues->event->message_create->sender_id;
+			$response['from_detail'] 				=  $this->getuser($statues->event->message_create->sender_id,$oauth_token,$oauth_token_secret);    
+			$response['created_timestamp'] 			=  $statues->event->created_timestamp;
+
+			$this->_success($response);
+		}
+				 
+	}
+
+	public function deletedirectmessage(){
+		
+		$this->_mandatory( array('oauth_token','oauth_token_secret','id'));
+		$oauth_token = $this->input->post('oauth_token');
+		$oauth_token_secret = $this->input->post('oauth_token_secret');
+		$id  = $this->input->post('id');
+
+		$connection = new TwitterOAuth($this->CONSUMER_KEY, $this->CONSUMER_SECRET, $oauth_token, $oauth_token_secret);
+
+		$params = array(
+			'id' => $id,
+		  );
+
+	
+		$statues = $connection->delete("direct_messages/events/destroy",$params);
+
+		if(isset($statues->errors)){
+			$this->_error($statues->errors['0']->code.' - '.$statues->errors['0']->message);
+		}else{  
+			$this->_success($statues);
+		}
+				 
+	}
+
+
+	public function webhooksregistercallback(){
+		
+		if(isset($_REQUEST['crc_token'])) {
+		  $signature = hash_hmac('sha256', $_REQUEST['crc_token'], $this->CONSUMER_SECRET, true);
+		  $response['response_token'] = 'sha256='.base64_encode($signature);
+		  print json_encode($response);
+		} else {   
+
+		  	$eventJSON = file_get_contents('php://input');
+			$data 	= json_decode($eventJSON);
+			if($data->direct_message_events[0]->type == 'message_create'){
+				$nama_file = $data->direct_message_events[0]->message_create->sender_id.'.txt';
+				$mode = (!file_exists('public/twitternotif/'.$nama_file)) ? 'w':'a';
+				$handle = fopen('public/twitternotif/'.$nama_file.'',$mode);
+				fwrite($handle,"\r\n".$eventJSON);
+				fclose($handle);
+			}
+				
+			
+		}
+		
+		$this->_mandatory( array('oauth_token','oauth_token_secret'));
+		$oauth_token = $this->input->post('oauth_token');
+		$oauth_token_secret = $this->input->post('oauth_token_secret');
+
+		$connection = new TwitterOAuth($this->CONSUMER_KEY, $this->CONSUMER_SECRET, $oauth_token, $oauth_token_secret);
+
+		$params = array(
+			'url' => 'https://theteamtheteam.com/sosialapi/sosial/twitter/twitter/webhooksregistercallback'
+		  );
+
+		
+		$statues = $connection->post("account_activity/all/development/webhooks",$params);
+
+		if(isset($statues->errors)){
+			$this->_error($statues->errors['0']->code.' - '.$statues->errors['0']->message);
+		}else{  
+			$this->_success($statues);
+		}
+				 
+	}
+	
+	public function webhooksunregistercallback(){
+	
+		
+		$this->_mandatory( array('oauth_token','oauth_token_secret','webhooks_id'));
+		$oauth_token 		= $this->input->post('oauth_token');
+		$oauth_token_secret = $this->input->post('oauth_token_secret');
+		$webhooks_id 		= $this->input->post('webhooks_id');
+		//$id  = $this->input->post('id');
+
+		$connection = new TwitterOAuth($this->CONSUMER_KEY, $this->CONSUMER_SECRET, $oauth_token, $oauth_token_secret);
+
+		$params = array();
+
+		
+		$statues = $connection->delete("account_activity/all/development/webhooks/$webhooks_id",$params);
+
+		if(isset($statues->errors)){
+			$this->_error($statues->errors['0']->code.' - '.$statues->errors['0']->message);
+		}else{  
+			$this->_success($statues);
+		}
+				 
+	}
+	
+	public function webhooksregistercallbackcheck(){
+		
+		$this->_mandatory( array('oauth_token','oauth_token_secret'));
+		$oauth_token = $this->input->post('oauth_token');
+		$oauth_token_secret = $this->input->post('oauth_token_secret');
+
+		$connection = new TwitterOAuth($this->CONSUMER_KEY, $this->CONSUMER_SECRET, $oauth_token, $oauth_token_secret);
+
+		$params = array();
+
+	
+		$statues = $connection->get("account_activity/all/webhooks",$params);
+
+		if(isset($statues->errors)){
+			$this->_error($statues->errors['0']->code.' - '.$statues->errors['0']->message);
+		}else{  
+			$this->_success($statues);
+		}
+				 
+	}
+	
+	
+	public function webhookssubscribe(){
+		
+		
+		$this->_mandatory( array('oauth_token','oauth_token_secret'));
+		$oauth_token = $this->input->post('oauth_token');
+		$oauth_token_secret = $this->input->post('oauth_token_secret');
+
+		$connection = new TwitterOAuth($this->CONSUMER_KEY, $this->CONSUMER_SECRET, $oauth_token, $oauth_token_secret);
+
+		$params = array();
+
+		
+		$statues = $connection->post("account_activity/all/development/subscriptions",$params);
+
+		if(isset($statues->errors)){
+			$this->_error($statues->errors['0']->code.' - '.$statues->errors['0']->message);
+		}else{  
+			$this->_success($statues);
+		}
+				 
+	}
+	
+	public function webhooksunsubscribe(){
+		
+		
+		$this->_mandatory( array('oauth_token','oauth_token_secret'));
+		$oauth_token = $this->input->post('oauth_token');
+		$oauth_token_secret = $this->input->post('oauth_token_secret');
+
+
+		$connection = new TwitterOAuth($this->CONSUMER_KEY, $this->CONSUMER_SECRET, $oauth_token, $oauth_token_secret);
+
+		$params = array();
+
+		
+		$statues = $connection->delete("account_activity/all/development/subscriptions",$params);
+
+		if(isset($statues->errors)){
+			$this->_error($statues->errors['0']->code.' - '.$statues->errors['0']->message);
+		}else{  
+			$this->_success($statues);
+		}
+				 
+	}
+
+	/*public function timeline(){
+		$twitter = new tmhOAuth();
+
+		$params = array(
+			'count'  => '1',
+		  );
+
+		$code = $twitter->user_request(array(
+			'method' => 'GET',
+			'url' => $twitter->url("1.1/statuses/user_timeline.json"),
+			'params' => $params,
+		  ));
+		if ($code == 200){
+			$data = json_decode($twitter->response['response'], true);
+			echo '<pre>';
+			print_r($data);die;
+		}
+				 
+	}*/
+
+
+}
